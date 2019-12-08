@@ -1,0 +1,132 @@
+---
+title: "Credit Data Analysis"
+output:
+  html_document: default
+  pdf_document: default
+  author: tavva_prudhvith
+---
+#Credit Data Risk Analysis
+The credit scoring data is a dataset provided by Prof. Hogmann in the file german.data. The data set has inf?rmation about 1000 individuals, on the basis of which they have been classified as risky or not. The variable response in the dataset corresponds to the risk label, 1 has been classified as bad and 2 has been classified as good.
+
+Initially, exploratory dat? analysis on the dataset has been performed. Further, a logistic regression model has been built to predict customers as risky or not, along with variable selection for the model building process.
+
+#Exploratory Data Analysis
+```{r}
+library(readr)
+data <- r?ad.csv("german_credit.csv",TRUE,",")
+```
+
+#Data Structure
+```{r}
+dim(data)
+```
+There are a total of 21 attributes in the dataset. Their descriptions and details have been tabulated below:
+
+Status of existing checking account.
+Duration in month
+Credit histo?y
+Purpose
+Credit amount
+Savings account/bonds
+Present employment since
+Installment rate in percentage of disposable income
+Personal status and sex
+Other debtors / guarantors
+Present residence since
+Property
+Age in years
+Other installment plans
+Housing
+Numb?r of existing credits at this bank
+Job
+Number of people being liable to provide maintenance for
+Telephone
+Foreign worker
+
+###Summary Statistics
+```{r}
+summary(data)
+```
+
+
+```{r}
+data$Credibility <- factor(ifelse(data$Creditability==1,"good","bad")) 
+data$t?rget <- factor(ifelse(data$Credibility == 'good',1,0))
+print("Lets look at the structure of the data")
+str(data)
+```
+
+### Exploratory Analysis
+Now that we have the data, its important that we understand the data before we attempt to model it.
+
+Lets look at?some descriptive stats of some of some of the numeric variables like months, age and credit amount.
+
+
+```{r}
+head(data)
+table(data$Credibility)/nrow(data)
+```
+
+```{r}
+summary(data$Duration.of.Credit..month.)
+
+summary(data$Age..years.)
+
+summary(data$Credit.?mount)
+```
+
+#Distribution of the continuous variables:
+```{r}
+brk <- seq(0, 80, 10)
+hist(data$Duration.of.Credit..month., breaks=brk, xlab = "Credit Month", ylab = "Frequency", main = "Freqency of Credit Months ", cex=0.4,col='lightblue') 
+grid(col = "ligh?gray", lty = "dotted")
+
+hist(data$Age..years., xlab = "Age", ylab = "Frequency", main = "Age Distribution", cex=0.4,col='lightblue')
+grid(col = "lightgray", lty = "dotted")
+
+hist(data$Credit.Amount, xlab = "Credit Amount", ylab = "Frequency", main = "Credi? Amount Distribution", cex=0.4,col='lightblue')
+grid(col = "lightgray", lty = "dotted")
+
+```
+All the three variables show marked positive skewness. Boxplots bear this out even more clearly.
+
+
+```{r}
+histogram(data$Credit.amount ~ Age..years. | Sex...Marita?.Status, data = data, xlab = "Age",main="Distribution of Age and Personal status & sex")
+```
+The histogram reveals that there is a right skewed nearly normal trend seen across all Personal Status and Sex categories, with 30 being the age where people in th? sample seem to be borrowing the most.
+
+
+Since most of the predictors are categorical with several levels, the full cross-classification of all variables will lead to zero observations in many cells. Hence we need to reduce the table size.
+
+Lets get a bit ?ore statsy and look at cross-tabulation and test independence of the row and column variable.
+Hence, with the help of p-value we could know the dependance of two variables.
+```{r}
+library(gmodels)
+with(data,CrossTable(Credibility, Value.Savings.Stocks, dig?ts=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T))
+
+with(data,CrossTable(Credibility, Sex...Marital.Status, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T))
+
+with(data,CrossTable(Credibility, No.of.dependents, digits=1, prop.r=F, prop.t=F, prop.chisq=F? chisq=T))
+```
+This reveals that there is dependence of savings and personal status on the credit rating. It also reveals that the number of dependents does not seem to have any bearing on the credit rating. Perhaps its fair to say that people who are inte?t on having a good credit rating continue to maintain the status irrespective of the number of dependents.
+
+We present below the final classification for the predictors that may potentially have any influence on Creditability
+
+Account Balance: No account (?), None (No balance) (2), Some Balance (3)
+Payment Status: Some Problems (1), Paid Up (2), No Problems (in this bank) (3)
+Savings/Stock Value: None, Below 100 DM, [100, 1000] DM, Above 1000 DM
+Employment Length: Below 1 year (including unemployed), [1, 4),?[4, 7), Above 7
+Sex/Marital Status: Male Divorced/Single, Male Married/Widowed, Female
+No of Credits at this bank: 1, More than 1
+Guarantor: None, Yes
+Concurrent Credits: Other Banks or Dept Stores, None
+Purpose of Credit: New car, Used car, Home Related, ?ther
+Most valuable available asset: 
+
+
+Hence, with the help of p-value we could know the dependance of two variables.
+
+```{r}
+
+```
