@@ -4,6 +4,7 @@ output:
   html_document: default
   pdf_document: default
   author: tavva_prudhvith
+  runtime:shiny
 ---
 #Credit Data Risk Analysis
 The credit scoring data is a dataset provided by Prof. Hogmann in the file german.data. The data set has inf?rmation about 1000 individuals, on the basis of which they have been classified as risky or not. The variable response in the dataset corresponds to the risk label, 1 has been classified as bad and 2 has been classified as good.
