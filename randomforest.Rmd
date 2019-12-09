@@ -1,0 +1,328 @@
+---
+title: "Credit Data Analysis with Interactive Model Training"
+author: "Mana_Capstone"
+date: "28.12.2016"
+output: html_document
+runtime: shiny
+---
+
+## Introduction
+
+You've got a problem - you don't know how to tell if a loan will be a good performer or a bad performer. On average, one of every nine loans you grant is defaulted on, but you're not sure how to tell the potentially good applicants from bad ones.  You've got historical data on customer information prior to being granted a loan, as well as information on whether these past loans were good (paid off) or bad (defaulted on).
+
+We first need to specify the target or dependent variable that we're trying to model.  In this case, the target is the variable *good_bad*. This variable contains an indicator as to whether the loan was a good one or a bad one.
+
+## Data exploration
+
+### Reading the data
+First, we open the file in Excel, and notice that the feature explanations are included on second row. We copy the original file with the second row removed, to make it easier to load the file in memory.
+
+```{r results='hide', warning=FALSE, message=FALSE}
+require(readxl)
+df <- as.data.frame(read_excel("credit_data.xls"))
+```
+
+### Quick examination
+The dimensions of the data:
+```{r}
+dim(df)
+```
+
+So, we have 1000 samples with the following 22 features:
+```{r}
+colnames(df)
+```
+
+Here *Target* and *good_bad* represent the target variable to model.
+
+Let us look at the data more closely by looking at the first 10 rows:
+```{r warning=FALSE, message=FALSE}
+require(knitr)
+kable(head(df,10))
+```
+
+Each row represents a customer in the data, and the target variable indicates whether the customer has defaulted on the loan (bad) or not (good). The features include customer information, such as the residential or marital status. We assume that these features will be given to us before granting a loan, and therefore it makes sense to build a model for predicting whether a new, unseen customer is likely to default on the loan or not.
+
+### Preprocessing
+Next, we assign column names to different data types.
+
+Most of the features are categorical:
+```{r}
+cat_vars <- c("checking","history","purpose","employed","installp",
+              "marital","coapp","resident","property","other",
+              "housing","existcr","job","depends","telephon",
+              "foreign","savings")
+```
+
+Numerical/integer features:
+```{r}
+int_vars <- c("duration","amount","age")
+```
+
+Target variables can also be considered as categorical variables:
+```{r}
+chr_vars <- c("Target","good_bad")
+```
+
+We use the previous information, and convert the columns to correct types for R dataframe:
+```{r}
+df[cat_vars] <- lapply(df[cat_vars],factor)
+df[int_vars] <- lapply(df[int_vars],as.integer)
+df[chr_vars] <- lapply(df[chr_vars],factor)
+```
+
+It seems like the *Target* and *good_bad* contains the same information. To be sure, we test this:
+```{r}
+all(-as.integer(df$good_bad)+2 == df$Target)
+```
+
+They contain the same information, so we may remove *Target* from the columns:
+```{r}
+df <- df[, !(colnames(df) %in% c("Target"))]
+colnames(df)[ncol(df)] <- "target"
+```
+
+The data is clean, with no missing data:
+```{r}
+sum(is.na(df))
+```
+
+### Feature exploration
+Now, we can print out a summary for the whole dataframe and each feature. This means calculating minimums, maximums, medians, means and quantiles for numerical variables, and counts for categorical variable levels:
+```{r}
+summary(df)
+```
+
+One interesting observations is that the target variable has 300 samples for *bad* and 700 samples for *good*. This means a ratio of $bad:good = 300:700 = 3:7$ in the training set. However, from the assignment instructions we know that the ratio should be $1:8$, which means that our sample is biased with so many samples from *bad* class in comparison to *good* class. When training our model for prediction, this needs to be taken into account.
+
+We set the correct ratio in *classwt* variable:
+```{r}
+classwt <- c(1,8)
+```
+
+Next, we may interactively explore different variables against the *good* and *bad* classes. The following plot displays the histogram of the chosen variable against the target variable.
+```{r echo=FALSE, warning=FALSE, results='hide', message=FALSE}
+require(ggplot2)
+require(scales)
+```
+```{r echo=FALSE, warning=FALSE}
+
+plotCount <- function(var) {
+  ggplot(df) +
+    stat_count(aes_string(x=var)) +
+    facet_grid(target~.) +
+    theme_bw()
+}
+
+plotHist <- function(var) {
+  ggplot(data=df, aes_string(x=var)) + 
+    geom_bar(aes(y = (..count..)/sum(..count..))) + 
+    scale_y_continuous(labels=percent) +
+    facet_grid(target~.) +
+    ylab("Frequency") +
+    theme_bw()
+}
+
+inputPanel(
+  selectInput("var", label="Choose a feature:", choices=colnames(df)),
+  radioButtons("type", label="Choose plot type:", choices=c("Count","Frequency"), inline=TRUE)
+)
+
+renderPlot({
+  if (input$type == "Count") plotCount(input$var)
+  else if (input$type == "Frequency") plotHist(input$var)
+}, height=600)
+```
+
+From these plots we can see, for instance, that for the feature *checking*, it seems to be unlikely that $checking=4$ for those defaulting on their loan.
+
+
+## Modeling
+
+### Approach
+We are trying to model a traditional classification problem: based on the given customer features and historical customer data, predict whether the customer is going to default or not.
+
+Many models could be used for solving this problem. Here we present one way to do it with a decision-tree based [Random Forest](https://en.wikipedia.org/wiki/Random_forest) classifier. This model is chosen for the following reasons:
+
+* It can handle mix of categorical and numerical variables out of the box
+* Under/overfitting can be controlled through multiple different parameters
+* The biased dataset, with more *bad* samples than on average, can be controlled through model parameter *classwt* (or *sampsize* and *strata*)
+* An existing R package [randomForest](https://cran.r-project.org/web/packages/randomForest/randomForest.pdf) can be utilized
+
+The original assignment is relatively straightforward, but what if we'd also like to associate costs/profits for the following scenarios:
+
+1. Our model predicts that the customer will default, when the customer does not default
+2. Our model predicts that the customer will default, when the customer does default
+3. Our model predicts that the customer will not default, when the customer does default
+4. Our model predicts that the customer will not default, when the customer does not default
+
+For example, points 1. and 3. could lead to business losses, and points 2. and 4. the opposite. Therefore, in the training process of our model, we might like to take into account that it is worse to predict point 1. than point 3. Later on, we allow the user to choose the cost/profit for each described scenario.
+
+### Interactive model training, hyperparameter search and validation
+
+Because the given training dataset is small, we validate our model using repeated [cross-validation](https://en.wikipedia.org/wiki/Cross-validation_(statistics)) with $k=5$ folds and $n=2$ repeats. With repeated cross validation we aim to avoid overfitting on the given dataset, and to reduce the generalization error for new, unseen samples. Two hyperparameters of the model, *mtry* and *threshold* are automatically optimized using grid search with the help of R's [caret](ftp://cran.r-project.org/pub/R/web/packages/caret/caret.pdf) package. 
+
+The goal of the model is to maximize the economic profit with the user-defined costs. 
+
+One may interactively train the model by:
+
+1. Setting the cost/profit values for each scenario below
+2. Pressing *Train the model* button
+3. Waiting for the results to appear below
+
+**Note**: It may take couple of minutes to train the model.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+# NOTE: Taken from [http://topepo.github.io/caret/using-your-own-model-in-train.html]
+
+require(caret)
+require(randomForest)
+require(e1071)
+
+## Get the model code for the original random forest method:
+rfWithThreshold <- getModelInfo("rf", regex = FALSE)[[1]]
+rfWithThreshold$type <- c("Classification")
+## Add the threshold as another tuning parameter
+rfWithThreshold$parameters <- data.frame(parameter = c("mtry", "threshold"),
+                                     class = c("numeric", "numeric"),
+                                     label = c("#Randomly Selected Predictors",
+                                               "Probability Cutoff"))
+## The default tuning grid code:
+rfWithThreshold$grid <- function(x, y, len = NULL, search = "grid") {
+  p <- ncol(x)
+  if(search == "grid") {
+    grid <- expand.grid(mtry = floor(sqrt(p)), 
+                        threshold = seq(.01, .99, length = len))
+  } else {
+    grid <- expand.grid(mtry = sample(1:p, size = len),
+                        threshold = runif(1, 0, size = len))
+  }
+  grid
+}
+
+## Here we fit a single random forest model (with a fixed mtry)
+## and loop over the threshold values to get predictions from the same
+## randomForest model.
+rfWithThreshold$loop = function(grid) {   
+  library(plyr)
+  loop <- ddply(grid, c("mtry"),
+                function(x) c(threshold = max(x$threshold)))
+  submodels <- vector(mode = "list", length = nrow(loop))
+  for(i in seq(along = loop$threshold)) {
+    index <- which(grid$mtry == loop$mtry[i])
+    cuts <- grid[index, "threshold"] 
+    submodels[[i]] <- data.frame(threshold = cuts[cuts != loop$threshold[i]])
+  }    
+  list(loop = loop, submodels = submodels)
+}
+
+## Fit the model independent of the threshold parameter
+rfWithThreshold$fit = function(x, y, wts, param, lev, last, classProbs, ...) { 
+  if(length(levels(y)) != 2)
+    stop("This works only for 2-class problems")
+  randomForest(x, y, mtry = param$mtry, ...)
+}
+
+## Now get a probability prediction and use different thresholds to
+## get the predicted class
+rfWithThreshold$predict = function(modelFit, newdata, submodels = NULL) {
+  class1Prob <- predict(modelFit, 
+                        newdata, 
+                        type = "prob")[, modelFit$obsLevels[1]]
+  ## Raise the threshold for class #1 and a higher level of
+  ## evidence is needed to call it class 1 so it should 
+  ## decrease sensitivity and increase specificity
+  out <- ifelse(class1Prob >= modelFit$tuneValue$threshold,
+                modelFit$obsLevels[1], 
+                modelFit$obsLevels[2])
+  if(!is.null(submodels)) {
+    tmp2 <- out
+    out <- vector(mode = "list", length = length(submodels$threshold))
+    out[[1]] <- tmp2
+    for(i in seq(along = submodels$threshold)) {
+      out[[i+1]] <- ifelse(class1Prob >= submodels$threshold[[i]],
+                           modelFit$obsLevels[1], 
+                           modelFit$obsLevels[2])
+    }
+  } 
+  out  
+}
+
+## The probabilities are always the same but we have to create
+## mulitple versions of the probs to evaluate the data across
+## thresholds
+rfWithThreshold$prob = function(modelFit, newdata, submodels = NULL) {
+  out <- as.data.frame(predict(modelFit, newdata, type = "prob"))
+  if(!is.null(submodels)) {
+    probs <- out
+    out <- vector(mode = "list", length = length(submodels$threshold)+1)
+    out <- lapply(out, function(x) probs)
+  } 
+  out 
+}
+```
+
+```{r echo=FALSE}
+h4("Cost parameters")
+inputPanel(
+  sliderInput("c1", "Model predicts that the customer will default, when the customer does not default:    ", value=-5, min=-10, max=10, step=1),
+  sliderInput("c2", "Model predicts that the customer will default, when the customer does default:        ", value=10, min=-10, max=10, step=1),
+  sliderInput("c3", "Model predicts that the customer will not default, when the customer does default:   \n", value=-10, min=-10, max=10, step=1),
+  sliderInput("c4", "Model predicts that the customer will not default, when the customer does not default:", value=5, min=-10, max=10, step=1),
+  actionButton("train", "Train the model", icon("refresh"))
+)
+
+h4("Results")
+verbatimTextOutput("text")
+
+observeEvent(input$train, {
+  
+  output$text <- renderPrint({
+
+    withProgress(message="Training model...", value=0, {
+      
+      cost <- isolate(matrix(c(input$c2,input$c1,input$c3,input$c4), ncol=2, byrow=T))
+      
+      n_folds <- 5
+      n_cv <- 2
+      
+      calcProfit <- function(y_pred,y_act,cost) {
+        confusion <- confusionMatrix(y_pred,y_act)$table
+        profit <- sum(cost*confusion)
+        names(profit) <- "profit"
+        profit
+      }
+      
+      profitFn <- function(data, lev=NULL, model=NULL) {
+        profit <- calcProfit(data$pred,data$obs,cost)
+        profit
+      }
+      
+      ctrl <- trainControl(method = "repeatedcv", number = n_folds, repeats = n_cv, 
+                           summaryFunction = profitFn, 
+                           classProbs=TRUE, allowParallel = TRUE, verboseIter=FALSE)
+      
+      fittedModel <- train(target~., 
+                           data=df,
+                           method=rfWithThreshold,
+                           trControl=ctrl,
+                           metric="profit",
+                           maximize=TRUE,
+                           classwt=classwt,
+                           tuneGrid=data.frame(mtry=c(3,5,3,5,3,5), threshold=c(0.4,0.4,0.5,0.5,0.6,0.6)))
+      print(fittedModel)
+      incProgress(1, message="Model trained!")
+    })
+  })
+})
+```
+
+## Further examination
+Due to time constraints, the model is by no means perfect. However, it should provide a decent starting point. 
+
+Things that would need require more inspection:
+
+* Taking the biased bad:good -ratio into account by using under/oversampling
+* Feature selection/extraction was not considered thoroughly
+* Getting a better understanding of each feature and their category levels
+* Trying other models, such as logistic regression, SVM or neural networks
